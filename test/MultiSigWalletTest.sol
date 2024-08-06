@@ -28,6 +28,11 @@ contract MultiSigWalletTest is Test {
         vm.deal(alice.addr, 1 ether);
         vm.deal(charlie.addr, 1 ether);
         vm.deal(address(msw), 1 ether);
+
+        vm.startPrank(owner.addr);
+        mytoken.mint(owner.addr, 100 ether);
+        mytoken.mint(address(msw), 100 ether);
+        vm.stopPrank();
     }
 
     function testSubmitProposal() public {
@@ -183,5 +188,53 @@ contract MultiSigWalletTest is Test {
         assertEq(data, "");
         assertEq(executed, false);
         assertEq(confirmations, 0);
+    }
+
+    function testSubmitProposalToken() public {
+        assertEq(mytoken.balanceOf(owner.addr), 100e18, "Owner balance should be 100 tokens");
+        assertEq(mytoken.balanceOf(address(msw)), 100e18, "MultiSigWallet balance should be 100 tokens");
+
+        // 准备参数
+        address target = address(mytoken); // 目标地址是 MyToken 合约地址
+        uint256 value = 0; // 转账金额为0，因为我们只调用函数
+        bytes memory data = abi.encodeWithSignature("transfer(address,uint256)", owner.addr, 50e18);
+
+        // 模拟 owner1 提交提案
+        vm.startPrank(owner.addr); // 模拟 owner1 的操作
+        msw.submitProposal(target, value, data);
+
+        // 验证提案已创建
+        uint256 proposalId = msw.getProposalsLength() - 1;
+        (address _target, uint256 _value, bytes memory _data, bool executed, uint256 confirmations) =
+            msw.getProposal(proposalId);
+
+        assertEq(_target, target);
+        assertEq(_value, value);
+        assertEq(_data, data);
+        assertFalse(executed);
+        assertEq(confirmations, 0);
+
+        msw.confirmProposal(0);
+        vm.stopPrank();
+        vm.prank(bob.addr);
+        msw.confirmProposal(0);
+
+        // Verify the proposal has been confirmed
+        (
+            address confirmedTarget,
+            uint256 confirmedValue,
+            bytes memory confirmedData,
+            bool confirmedExecuted,
+            uint256 confirmedConfirmations
+        ) = msw.getProposal(proposalId);
+        assertEq(confirmedTarget, target);
+        assertEq(confirmedValue, value);
+        assertEq(confirmedData, data);
+        assertTrue(confirmedExecuted);
+        assertEq(confirmedConfirmations, 2);
+
+        assertGe(confirmedConfirmations, msw.threshold(), "Confirmations should be greater than or equal to threshold");
+        require(msw.isConfirmed(0, owner.addr), "Proposal not confirmed");
+        assertEq(mytoken.balanceOf(owner.addr), 150e18, "Owner balance should be 150 tokens");
     }
 }
